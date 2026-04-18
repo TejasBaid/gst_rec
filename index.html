@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GST Reconciliation Tool</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Include ExcelJS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <header>
+      <h1>GST Reconciliation Tool</h1>
+      <p>Two steps: (1) Export a Review Excel, edit Include?, save. (2) Generate Final.xlsx from that saved file.</p>
+    </header>
+
+    <!-- Step 1: Export Review -->
+    <section class="card">
+      <div class="section-title">Step 1 — Export review workbook</div>
+      
+      <div class="form-row">
+        <label>Tally.xlsx:</label>
+        <div class="file-input-wrapper">
+          <input type="text" id="tallyPath" placeholder="Select Tally file..." readonly>
+          <input type="file" id="tallyFile" accept=".xlsx" style="display:none">
+          <button type="button" class="btn-browse" onclick="document.getElementById('tallyFile').click()">Browse</button>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>GST.xlsx:</label>
+        <div class="file-input-wrapper">
+          <input type="text" id="gstPath" placeholder="Select GST file..." readonly>
+          <input type="file" id="gstFile" accept=".xlsx" style="display:none">
+          <button type="button" class="btn-browse" onclick="document.getElementById('gstFile').click()">Browse</button>
+        </div>
+      </div>
+
+      <div class="form-row multi-col">
+        <div class="col">
+          <label>Month:</label>
+          <select id="monthSelect">
+            <option>January</option><option>February</option><option>March</option>
+            <option>April</option><option>May</option><option>June</option>
+            <option>July</option><option>August</option><option>September</option>
+            <option>October</option><option>November</option><option>December</option>
+          </select>
+        </div>
+        <div class="col">
+          <label>Year:</label>
+          <select id="yearSelect"></select>
+        </div>
+        <div class="col flex-2">
+          <label>Company:</label>
+          <input type="text" id="companyInput" value="Packwell Polymers">
+        </div>
+      </div>
+
+      <button id="btnStep1" class="btn-primary" type="button">1. Export review workbook</button>
+    </section>
+
+    <!-- Step 2: Generate Final -->
+    <section class="card">
+      <div class="section-title">Step 2 — Generate Final.xlsx (uses saved review file only)</div>
+      
+      <div class="form-row">
+        <label>Review.xlsx:</label>
+        <div class="file-input-wrapper">
+          <input type="text" id="reviewPath" placeholder="Select Review file..." readonly>
+          <input type="file" id="reviewFile" accept=".xlsx" style="display:none">
+          <button type="button" class="btn-browse" onclick="document.getElementById('reviewFile').click()">Browse</button>
+        </div>
+      </div>
+
+      <div class="section-subtitle">RCM taxable amounts (for Final) ₹</div>
+      <div class="form-row multi-col">
+        <div class="col">
+          <label>Lease Rent @18%</label>
+          <input type="text" id="rcmLease" value="0">
+        </div>
+        <div class="col">
+          <label>Office Rent @18%</label>
+          <input type="text" id="rcmOffice" value="0">
+        </div>
+      </div>
+      <div class="form-row multi-col">
+        <div class="col">
+          <label>Freight Outstation @5% (IGST)</label>
+          <input type="text" id="rcmFreightOut" value="0">
+        </div>
+        <div class="col">
+          <label>Freight Local @2.5% (CGST+SGST)</label>
+          <input type="text" id="rcmFreightLocal" value="0">
+        </div>
+      </div>
+
+      <div class="section-subtitle">Sales data (for Final)</div>
+      <div class="form-row multi-col">
+        <div class="col">
+          <label>Sales Taxable Amount ₹</label>
+          <input type="text" id="salesTaxable" value="0">
+        </div>
+        <div class="col">
+          <label>Sales CGST / SGST ₹</label>
+          <input type="text" id="salesCgst" value="0">
+        </div>
+        <div class="col">
+          <label>Sales IGST ₹</label>
+          <input type="text" id="salesIgst" value="0">
+        </div>
+      </div>
+
+      <div class="section-subtitle">Opening ITC (for Final) ₹</div>
+      <div class="form-row multi-col">
+        <div class="col">
+          <label>Opening IGST ITC ₹</label>
+          <input type="text" id="openIgst" value="0">
+        </div>
+        <div class="col">
+          <label>Opening CGST ITC ₹</label>
+          <input type="text" id="openCgst" value="0">
+        </div>
+        <div class="col">
+          <label>Opening SGST ITC ₹</label>
+          <input type="text" id="openSgst" value="0">
+        </div>
+      </div>
+
+      <button id="btnStep2" class="btn-primary" type="button">2. Generate Final.xlsx</button>
+    </section>
+
+    <div id="statusWrap">
+      <div id="loader" class="loader" style="display:none"></div>
+      <div id="statusText">Wait...</div>
+    </div>
+  </div>
+
+  <!-- Routing Modal -->
+  <div id="routingModal" class="modal">
+    <div class="modal-content">
+      <h2>Classify BREAK UP lines</h2>
+      <p id="routingSubtext">Include? is Yes — choose where each line appears in Final.xlsx.</p>
+      <div class="table-container">
+        <table id="routingTable">
+          <thead>
+            <tr>
+              <th>RowId</th>
+              <th>Party</th>
+              <th>Invoice / Doc</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button id="btnCancelRouting" class="btn-secondary">Cancel</button>
+        <button id="btnApplyRouting" class="btn-primary">Apply and generate Final</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="excel_reader.js"></script>
+  <script src="reconciliation.js"></script>
+  <script src="review_workbook.js"></script>
+  <script src="excel_writer.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
