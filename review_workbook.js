@@ -237,7 +237,7 @@ function rowsRequiringRouting(snap) {
         if(!parseInclude(d["Include?"])) return;
         if(!statusNeedsBreakupRouting(valStr(d["Status"]))) return;
         const bucket = valStr(d["Bucket"]).toUpperCase();
-        if(bucket === "PORTAL" || bucket === "HOLD") out.push(d);
+        if(bucket === "PORTAL" || bucket === "HOLD" || bucket === "CDNR") out.push(d);
     });
     return out;
 }
@@ -320,18 +320,28 @@ function snapshotToReconciliation(snap, route = {}) {
             return;
         }
 
-        if (bucket === "PORTAL") {
+        if (bucket === "PORTAL" || bucket === "HOLD" || bucket === "CDNR") {
             if (inc) {
                 if (statusNeedsBreakupRouting(valStr(d["Status"]))) {
                     const c = route[rid];
                     if (c === "hold") holdE.push(rowToGst(d));
                     else if (c === "reverted") portalExc.push(rowToGst(d));
-                    else portalE.push(rowToGst(d));
+                    else if (c === "cdnr") cdnrE.push(rowToCdnr(d));
+                    else {
+                        // default behavior
+                        if (bucket === "CDNR") cdnrE.push(rowToCdnr(d));
+                        else if (bucket === "HOLD") holdE.push(rowToGst(d));
+                        else portalE.push(rowToGst(d));
+                    }
                 } else {
-                    portalE.push(rowToGst(d));
+                    if (bucket === "CDNR") cdnrE.push(rowToCdnr(d));
+                    else if (bucket === "HOLD") holdE.push(rowToGst(d));
+                    else portalE.push(rowToGst(d));
                 }
             } else {
-                portalExc.push(rowToGst(d));
+                if (bucket === "PORTAL" || bucket === "HOLD" || bucket === "CDNR") {
+                   portalExc.push(rowToGst(d));
+                }
             }
             return;
         }
@@ -340,17 +350,6 @@ function snapshotToReconciliation(snap, route = {}) {
 
         if (bucket === "RCM_BOOK") {
             rcmTally.push(rowToTally(d));
-        } else if (bucket === "HOLD") {
-            if (statusNeedsBreakupRouting(valStr(d["Status"]))) {
-                const c = route[rid];
-                if (c === "hold") holdE.push(rowToGst(d));
-                else if (c === "reverted") portalExc.push(rowToGst(d));
-                else portalE.push(rowToGst(d));
-            } else {
-                holdE.push(rowToGst(d));
-            }
-        } else if (bucket === "CDNR") {
-            cdnrE.push(rowToCdnr(d));
         }
     });
 

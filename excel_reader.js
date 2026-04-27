@@ -270,46 +270,47 @@ async function readGstB2b(arrayBuffer) {
 async function readGstCdnr(arrayBuffer) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(arrayBuffer);
-  let sheetName = null;
-  workbook.eachSheet((ws) => {
-    const u = ws.name.toUpperCase();
-    if (u.includes("CDNR") && u.includes("B2B") && !u.replace("B2B-CDNR","").includes("A")) {
-      sheetName = ws.name;
-    }
+  let ws = workbook.worksheets.find(w => {
+    const u = w.name.toUpperCase();
+    return u.includes("CDNR") && u.includes("B2B") && !u.includes("-CDNRA") && !u.includes("(REJECTED)");
   });
-  if (!sheetName) sheetName = "B2B-CDNR";
-  const ws = workbook.getWorksheet(sheetName);
+  if (!ws) ws = workbook.getWorksheet("B2B-CDNR");
   if (!ws) return [];
 
-  const entries = [];
-  for (let r = 7; r <= ws.rowCount; r++) {
-    const vals = ws.getRow(r).values.slice(1);
-    if (!vals || vals[0] == null) break;
-    const gstin = valStr(vals[0]).toUpperCase();
-    if (gstin === "") continue;
+  let hr = 1;
+  for (let r = 1; r <= 20; r++) {
+    const v = valStr(ws.getRow(r).getCell(1).value).toUpperCase();
+    if (v.includes("GSTIN") && v.includes("SUPPLIER")) { hr = r; break; }
+  }
 
-    let formatDt = valStr(vals[5]);
-    if (vals[5] instanceof Date) {
-      const dt = vals[5];
-      formatDt = `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
+  const entries = [];
+  const start = hr + 2; 
+  for (let r = start; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const vals = row.values.slice(1);
+    if (!vals || vals.length < 13 || !vals[0]) continue;
+    
+    let dt = vals[5];
+    let formatDt = "";
+    if (dt instanceof Date) {
+        formatDt = `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
+    } else {
+        formatDt = valStr(dt);
     }
 
     entries.push({
-      gstin: gstin,
+      gstin: valStr(vals[0]).toUpperCase(),
       name: valStr(vals[1]),
       note_no: valStr(vals[2]),
       note_type: valStr(vals[3]),
       note_supply_type: valStr(vals[4]),
       note_date: formatDt,
       note_value: valFloat(vals[6]),
-      place_of_supply: valStr(vals[7]),
-      reverse_charge: valStr(vals[8]),
       taxable: valFloat(vals[9]),
       igst: valFloat(vals[10]),
       cgst: valFloat(vals[11]),
       sgst: valFloat(vals[12]),
-      cess: valFloat(vals[13]),
-      itc_availability: vals.length > 22 ? valStr(vals[22]) : ""
+      cess: valFloat(vals[13])
     });
   }
   return entries;

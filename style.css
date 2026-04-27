@@ -235,6 +235,12 @@ th {
   top: 0;
   z-index: 1;
 }
+/* Column widths */
+#routingTable th:nth-child(1), #routingTable td:nth-child(1) { width: 80px; }
+#routingTable th:nth-child(2), #routingTable td:nth-child(2) { width: 250px; }
+#routingTable th:nth-child(3), #routingTable td:nth-child(3) { width: 150px; }
+#routingTable th:nth-child(4), #routingTable td:nth-child(4) { width: 120px; }
+#routingTable th:nth-child(5), #routingTable td:nth-child(5) { width: 250px; }
 .modal-actions {
   padding: 16px 20px;
   display: flex;

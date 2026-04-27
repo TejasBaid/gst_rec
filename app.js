@@ -165,6 +165,10 @@ function showRoutingModal(rows) {
         const rid = valStr(r["RowId"]);
         const buck = valStr(r["Bucket"]);
         
+        const cdnrOption = (buck === 'CDNR') 
+            ? `<option value="cdnr">Add/Less : ITC taken from GSTR 2B CDNRA</option>` 
+            : '';
+
         tr.innerHTML = `
             <td>${rid}<br><small style="color:var(--text-muted)">${buck}</small></td>
             <td>${party.length > 50 ? party.substring(0,47)+'...' : party}</td>
@@ -172,10 +176,11 @@ function showRoutingModal(rows) {
             <td>${st}</td>
             <td>
                 <select id="route_sel_${idx}" style="width: 100%">
-                    <option value="" disabled selected>Select action...</option>
+                    <option value="" selected>Select action... (blank = Reverted)</option>
                     <option value="hold">Add : ITC hold earlier now reflected in GSTR 2B</option>
                     <option value="reverted">Less : ITC Reverted</option>
                     <option value="portal">Add : ITC taken from GSTR 2B</option>
+                    ${cdnrOption}
                 </select>
             </td>
         `;
@@ -195,12 +200,8 @@ ui.btnApplyRouting.addEventListener('click', async () => {
     routingChoiceMap = {};
     for(let i=0; i<pendingRoutingRows.length; i++) {
         const sel = document.getElementById(`route_sel_${i}`);
-        if (!sel.value) {
-            alert("Please select an action for all rows before applying.");
-            return;
-        }
         const rid = parseInt(pendingRoutingRows[i]["RowId"], 10);
-        routingChoiceMap[rid] = sel.value;
+        routingChoiceMap[rid] = sel.value || "reverted";
     }
     
     ui.routingModal.classList.remove('visible');
