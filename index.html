@@ -3,36 +3,44 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GST Reconciliation Tool</title>
+  <meta name="description" content="Premium GST Reconciliation tool for Godfrey Phillips India">
+  <title>GST Reconciliation | Godfrey Phillips India</title>
   <link rel="stylesheet" href="style.css">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
   <!-- Include ExcelJS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 </head>
 <body>
-  <div class="app-container">
+  <div class="app-container" id="appContainer">
     <header>
-      <h1>GST Reconciliation Tool</h1>
-      <p>Two steps: (1) Export a Review Excel, edit Include?, save. (2) Generate Final.xlsx from that saved file.</p>
+      <h1>GST Reconciliation</h1>
+      <p>Godfrey Phillips India Enterprise Tool</p>
     </header>
 
-    <!-- Step 1: Export Review -->
-    <section class="card">
-      <div class="section-title">Step 1 — Export review workbook</div>
+    <div class="wizard-progress" id="wizardProgress">
+      <div class="step active" id="stepIndicator1">1. Data Ingestion</div>
+      <div class="step" id="stepIndicator2">2. Outward Data</div>
+      <div class="step" id="stepIndicator3">3. Review Data</div>
+      <div class="step" id="stepIndicator4">4. Generate</div>
+    </div>
+
+    <!-- Step 1: Data Ingestion -->
+    <section class="card wizard-step active" id="step1">
+      <div class="section-title">Upload Sources</div>
       
       <div class="form-row">
-        <label>Tally.xlsx:</label>
+        <label>Oracle ERP (.xlsx):</label>
         <div class="file-input-wrapper">
-          <input type="text" id="tallyPath" placeholder="Select Tally file..." readonly>
+          <input type="text" id="tallyPath" placeholder="Select Oracle ERP file..." readonly>
           <input type="file" id="tallyFile" accept=".xlsx" style="display:none">
           <button type="button" class="btn-browse" onclick="document.getElementById('tallyFile').click()">Browse</button>
         </div>
       </div>
 
       <div class="form-row">
-        <label>GST.xlsx:</label>
+        <label>GST 2B (.xlsx):</label>
         <div class="file-input-wrapper">
-          <input type="text" id="gstPath" placeholder="Select GST file..." readonly>
+          <input type="text" id="gstPath" placeholder="Select GST portal file (.xlsx)..." readonly>
           <input type="file" id="gstFile" accept=".xlsx" style="display:none">
           <button type="button" class="btn-browse" onclick="document.getElementById('gstFile').click()">Browse</button>
         </div>
@@ -54,27 +62,36 @@
         </div>
         <div class="col flex-2">
           <label>Company:</label>
-          <input type="text" id="companyInput" value="Packwell Polymers">
+          <input type="text" id="companyInput" value="Godfrey Phillips India Limited">
         </div>
       </div>
-
-      <button id="btnStep1" class="btn-primary" type="button">1. Export review workbook</button>
+      
+      <div class="wizard-actions">
+        <button type="button" class="btn-primary" onclick="nextStep(2)">Next: Outward Data</button>
+      </div>
     </section>
 
-    <!-- Step 2: Generate Final -->
-    <section class="card">
-      <div class="section-title">Step 2 — Generate Final.xlsx (uses saved review file only)</div>
+    <!-- Step 2: Outward Data -->
+    <section class="card wizard-step" id="step2">
+      <div class="section-title">Manual Overrides</div>
       
-      <div class="form-row">
-        <label>Review.xlsx:</label>
-        <div class="file-input-wrapper">
-          <input type="text" id="reviewPath" placeholder="Select Review file..." readonly>
-          <input type="file" id="reviewFile" accept=".xlsx" style="display:none">
-          <button type="button" class="btn-browse" onclick="document.getElementById('reviewFile').click()">Browse</button>
+      <div class="section-subtitle">Sales Data (₹)</div>
+      <div class="form-row multi-col">
+        <div class="col">
+          <label>Sales Taxable Amount</label>
+          <input type="text" id="salesTaxable" value="0">
+        </div>
+        <div class="col">
+          <label>Sales CGST / SGST</label>
+          <input type="text" id="salesCgst" value="0">
+        </div>
+        <div class="col">
+          <label>Sales IGST</label>
+          <input type="text" id="salesIgst" value="0">
         </div>
       </div>
 
-      <div class="section-subtitle">RCM taxable amounts (for Final) ₹</div>
+      <div class="section-subtitle">RCM Taxable Amounts (₹)</div>
       <div class="form-row multi-col">
         <div class="col">
           <label>Lease Rent @18%</label>
@@ -91,78 +108,148 @@
           <input type="text" id="rcmFreightOut" value="0">
         </div>
         <div class="col">
-          <label>Freight Local @2.5% (CGST+SGST)</label>
+          <label>Freight Local @2.5% (CGST/SGST)</label>
           <input type="text" id="rcmFreightLocal" value="0">
         </div>
       </div>
 
-      <div class="section-subtitle">Sales data (for Final)</div>
+      <div class="section-subtitle">Opening ITC Balance (₹)</div>
       <div class="form-row multi-col">
         <div class="col">
-          <label>Sales Taxable Amount ₹</label>
-          <input type="text" id="salesTaxable" value="0">
-        </div>
-        <div class="col">
-          <label>Sales CGST / SGST ₹</label>
-          <input type="text" id="salesCgst" value="0">
-        </div>
-        <div class="col">
-          <label>Sales IGST ₹</label>
-          <input type="text" id="salesIgst" value="0">
-        </div>
-      </div>
-
-      <div class="section-subtitle">Opening ITC (for Final) ₹</div>
-      <div class="form-row multi-col">
-        <div class="col">
-          <label>Opening IGST ITC ₹</label>
+          <label>Opening IGST</label>
           <input type="text" id="openIgst" value="0">
         </div>
         <div class="col">
-          <label>Opening CGST ITC ₹</label>
+          <label>Opening CGST</label>
           <input type="text" id="openCgst" value="0">
         </div>
         <div class="col">
-          <label>Opening SGST ITC ₹</label>
+          <label>Opening SGST</label>
           <input type="text" id="openSgst" value="0">
         </div>
       </div>
 
-      <button id="btnStep2" class="btn-primary" type="button">2. Generate Final.xlsx</button>
+      <div class="wizard-actions">
+        <button type="button" class="btn-secondary" onclick="prevStep(1)">Back</button>
+        <button type="button" class="btn-primary" id="btnGoToReview">Next: Review Discrepancies</button>
+      </div>
     </section>
 
-    <div id="statusWrap">
-      <div id="loader" class="loader" style="display:none"></div>
-      <div id="statusText">Wait...</div>
-    </div>
-  </div>
-
-  <!-- Routing Modal -->
-  <div id="routingModal" class="modal">
-    <div class="modal-content">
-      <h2>Classify BREAK UP lines</h2>
-      <p id="routingSubtext">Include? is Yes — choose where each line appears in Final.xlsx.</p>
-      <div class="table-container">
-        <table id="routingTable">
-          <thead>
-            <tr>
-              <th>RowId</th>
-              <th>Party</th>
-              <th>Invoice / Doc</th>
-              <th>Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
+    <!-- Step 3: Review Discrepancies -->
+    <section class="card wizard-step" id="step3">
+      <div class="section-title">Review Discrepancies</div>
+      <p style="color: var(--text-muted); margin-bottom: 2rem;">Please review and resolve any conflicts found between Oracle and GST 2B.</p>
+      
+      <div id="reviewLoader" class="loader" style="display:none"></div>
+      
+      <div id="reviewContent" style="display:none">
+        <div class="section-subtitle">Tally Duplicates</div>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">Invoices with duplicate rows differing only by TRX REC.</p>
+        <table class="dash-table" id="tableDuplicates">
+          <thead><tr><th>Invoice</th><th>GSTIN</th><th>Action</th></tr></thead>
           <tbody></tbody>
         </table>
+
+        <div class="section-subtitle" style="margin-top: 2rem;">ITC Availability Overrides</div>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">Oracle marked as Recoverable, but GST 2B says ITC is unavailable.</p>
+        <table class="dash-table" id="tableOverrides">
+          <thead><tr><th>Invoice</th><th>GSTIN</th><th>Action</th></tr></thead>
+          <tbody></tbody>
+        </table>
+
+        <div class="section-subtitle" style="margin-top: 2rem;">Missing from GST Portal (Not in 2B)</div>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">Invoices present in Oracle but missing from GST 2B. By default, these are moved to the "Not in 2B" sheet. Check the box to FORCE INCLUDE them in the Inward sheet as Matched.</p>
+        <div style="margin: 1rem 0;">
+          <input type="text" id="searchNotIn2B" placeholder="Search by Invoice or GSTIN..." style="width: 100%; padding: 0.5rem;">
+        </div>
+        <div style="max-height: 300px; overflow-y: auto;">
+          <table class="dash-table" id="tableNotIn2B">
+            <thead><tr><th style="width: 50px;">Force</th><th>Invoice</th><th>GSTIN</th><th>Party</th><th>Tax Amount</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
-      <div class="modal-actions">
-        <button id="btnCancelRouting" class="btn-secondary">Cancel</button>
-        <button id="btnApplyRouting" class="btn-primary">Apply and generate Final</button>
+
+      <div class="wizard-actions" style="margin-top: 2rem;">
+        <button type="button" class="btn-secondary" onclick="prevStep(2)">Back</button>
+        <button type="button" class="btn-primary" onclick="nextStep(4)">Next: Generate GSTR-3B</button>
       </div>
+    </section>
+
+    <!-- Step 4: Generation -->
+    <section class="card wizard-step" id="step4">
+      <div class="section-title">Finalize GSTR-3B</div>
+      <p style="color: var(--text-muted); margin-bottom: 2rem;">Click below to process the reconciliation with your chosen resolutions, generate the final GSTR-3B Excel workbook, and unlock the interactive dashboard.</p>
+      
+      <button id="btnGenerate" class="btn-primary btn-large" type="button">Process & Download GSTR-3B</button>
+      
+      <div id="statusWrap">
+        <div id="loader" class="loader" style="display:none"></div>
+        <div id="statusText">Ready</div>
+      </div>
+      
+      <div class="wizard-actions" style="margin-top: 2rem;">
+        <button type="button" class="btn-secondary" onclick="prevStep(3)" id="btnBackTo3">Back</button>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Dashboard (Hidden initially) -->
+  <div class="dashboard-container" id="dashboardContainer" style="display: none;">
+    <header class="dashboard-header">
+      <h2>GSTR-3B Dashboard</h2>
+      <button class="btn-secondary btn-small" onclick="resetWizard()">Start New Reconciliation</button>
+    </header>
+
+    <div class="dashboard-cards">
+      <div class="dash-card">
+        <h3>Total Matched</h3>
+        <p class="dash-value" id="dashTotalMatched">0</p>
+      </div>
+      <div class="dash-card">
+        <h3>Eligible ITC (Matched)</h3>
+        <p class="dash-value" id="dashTotalEligible">₹0</p>
+      </div>
+      <div class="dash-card">
+        <h3>Not in 2B (Excluded)</h3>
+        <p class="dash-value" id="dashTotalMissing">0</p>
+      </div>
+      <div class="dash-card">
+        <h3>Portal Only</h3>
+        <p class="dash-value" id="dashTotalPortal">0</p>
+      </div>
+    </div>
+
+    <div class="dashboard-tabs">
+      <button class="tab-btn active" onclick="switchTab('tabMatched')">Matched (Eligible & RCM)</button>
+      <button class="tab-btn" onclick="switchTab('tabMissing')">Not in 2B (Oracle Only)</button>
+      <button class="tab-btn" onclick="switchTab('tabPortal')">Portal Only (Missing in Oracle)</button>
+    </div>
+
+    <div class="tab-content active" id="tabMatched">
+      <table class="dash-table">
+        <thead><tr><th>Oracle Invoice</th><th>Party</th><th>Date</th><th>IGST</th><th>CGST</th><th>SGST</th></tr></thead>
+        <tbody id="tbodyMatched"></tbody>
+      </table>
+    </div>
+
+    <div class="tab-content" id="tabMissing">
+      <table class="dash-table">
+        <thead><tr><th>Oracle Invoice</th><th>Party</th><th>Date</th><th>IGST</th><th>CGST</th><th>SGST</th></tr></thead>
+        <tbody id="tbodyMissing"></tbody>
+      </table>
+    </div>
+
+    <div class="tab-content" id="tabPortal">
+      <table class="dash-table">
+        <thead><tr><th>Portal Invoice</th><th>Party</th><th>Date</th><th>IGST</th><th>CGST</th><th>SGST</th></tr></thead>
+        <tbody id="tbodyPortal"></tbody>
+      </table>
     </div>
   </div>
 
+  <script src="template.js"></script>
   <script src="excel_reader.js"></script>
   <script src="reconciliation.js"></script>
   <script src="review_workbook.js"></script>

@@ -251,23 +251,64 @@ function snapshotToReconciliation(snap, route = {}) {
         return valStr(val);
     };
 
-    const rowToTally = d => ({
-        date: parseExcelDate(d["BookDate"]),
-        party: valStr(d["PartyOrName"]),
-        gstin: valStr(d["GSTIN"]).toUpperCase(),
-        vch_type: valStr(d["VchType"]),
-        vch_no: valStr(d["VchNo"]),
-        doc_no: valStr(d["DocOrInvoiceNo"]),
-        doc_date: parseExcelDate(d["DocOrInvoiceDate"]),
-        taxable: valFloat(d["Taxable"]),
-        igst: valFloat(d["IGST"]),
-        cgst: valFloat(d["CGST"]),
-        sgst: valFloat(d["SGST"]),
-        cess: valFloat(d["Cess"]),
-        tax_amount: valFloat(d["TaxAmount"]),
-        invoice_amount: valFloat(d["InvoiceValue"]),
-        status: valStr(d["Status"])
-    });
+    const rowToTally = d => {
+        const t = {
+            date: parseExcelDate(d["BookDate"]),
+            party: valStr(d["PartyOrName"]),
+            gstin: valStr(d["GSTIN"]).toUpperCase(),
+            vch_type: valStr(d["VchType"]),
+            vch_no: valStr(d["VchNo"]),
+            doc_no: valStr(d["DocOrInvoiceNo"]),
+            doc_date: parseExcelDate(d["DocOrInvoiceDate"]),
+            taxable: valFloat(d["Taxable"]),
+            igst: valFloat(d["IGST"]),
+            cgst: valFloat(d["CGST"]),
+            sgst: valFloat(d["SGST"]),
+            cess: valFloat(d["Cess"]),
+            tax_amount: valFloat(d["TaxAmount"]),
+            invoice_amount: valFloat(d["InvoiceValue"]),
+            status: valStr(d["Status"]),
+            raw_row: []
+        };
+        // Reconstruct basic raw_row (first 60 cols won't have all data since it was lost in export,
+        // but we can put the key ones back and pad)
+        for (let i = 0; i < 60; i++) t.raw_row.push(null);
+        t.raw_row[14] = d["RowId"]; // TRX ID approx
+        t.raw_row[20] = t.gstin;
+        t.raw_row[27] = t.doc_no;
+        t.raw_row[37] = t.sgst;
+        t.raw_row[38] = t.cgst;
+        t.raw_row[39] = t.igst;
+        t.raw_row[49] = t.invoice_amount;
+        
+        // Append 61-71
+        const stateCode = '07';
+        const stateName = 'Delhi';
+        const keyVal = t.gstin + t.doc_no;
+        const totalTaxRow = t.igst + t.cgst + t.sgst;
+        
+        let invYear = 'FY 2026-27';
+        if (t.doc_date instanceof Date) {
+            if (t.doc_date.getFullYear() < 2026 || (t.doc_date.getFullYear() === 2026 && t.doc_date.getMonth() < 3)) invYear = 'FY 2025-26';
+        }
+        
+        let itcType = "";
+        let remark = "Matched";
+        let isRecov = true; // Assume true if included
+        const st = t.status.toUpperCase();
+        if (st.includes("RCM")) {
+            remark = "RCM";
+            itcType = isRecov ? "RCM Rec" : "RCM Non Rec";
+        } else if (st.includes("NOT IN 2B") || st.includes("NOT IN GST 2B")) {
+            remark = "Not in 2B";
+            itcType = isRecov ? "Fwd Rec" : "Fwd Non Rec";
+        } else {
+            itcType = isRecov ? "Fwd Rec" : "Fwd Non Rec";
+        }
+
+        t.raw_row.push(stateCode, stateName, keyVal, totalTaxRow, null, null, remark, t.raw_row[14], itcType, invYear, 1);
+        return t;
+    };
 
     const rowToGst = d => ({
         gstin: valStr(d["GSTIN"]).toUpperCase(),

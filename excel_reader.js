@@ -40,27 +40,30 @@ function normHeader(h) {
   return String(h).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function getTallyField(header) {
+function getOracleField(header) {
   const n = normHeader(header);
   if (!n) return null;
-  if (n === 'date') return 'date';
-  if (n === 'particulars') return 'particulars';
-  if (n.includes('gstin') || n.endsWith('gstinuin')) return 'gstin';
-  if (n === 'vchtype') return 'vch_type';
-  if (n === 'vchno') return 'vch_no';
-  if (n === 'docno') return 'doc_no';
-  if (n === 'docdate' || n === 'doc') return 'doc_date';
-  if (n.includes('taxable')) return 'taxable';
+  if (n === 'accountingdate') return 'date';
+  if (n === 'partyname') return 'party';
+  if (n === 'tpregnno') return 'gstin';
+  if (n === 'trxtype') return 'vch_type';
+  if (n === 'trxnumber') return 'vch_no';
+  if (n === 'supplierinvoicenum') return 'doc_no';
+  if (n === 'supplierinvoicedate') return 'doc_date';
+  if (n === 'gsttaxableamt') return 'taxable';
   if (n === 'igst') return 'igst';
   if (n === 'cgst') return 'cgst';
-  if (n.startsWith('sgst') || n === 'sgstutgst') return 'sgst';
-  if (n === 'cess') return 'cess';
-  if (n === 'tax' || n === 'taxamount') return 'tax_amount';
-  if (n === 'invoice' || n === 'invoiceamount') return 'invoice_amount';
+  if (n === 'sgst') return 'sgst';
+  if (n === 'cess1') return 'cess1';
+  if (n === 'cess2') return 'cess2';
+  if (n === 'totalinvoiceamount') return 'invoice_amount';
+  if (n === 'trxrec') return 'trx_rec';
+  if (n === 'trxself') return 'trx_self';
+  if (n === 'trxid') return 'trx_id';
   return null;
 }
 
-async function readTally(arrayBuffer) {
+async function readOracleERP(arrayBuffer) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(arrayBuffer);
   let ws = workbook.getWorksheet('Sheet1') || workbook.worksheets[0];
@@ -71,48 +74,46 @@ async function readTally(arrayBuffer) {
   ws.eachRow((row, rowNumber) => {
     if (headerRowIdx) return;
     const vals = row.values.slice(1);
-    const v0 = valStr(vals[0]);
-    const v1 = valStr(vals[1]);
-    if (v0 === 'Date' && v1 === 'Particulars') {
+    const hasAccDate = vals.some(v => normHeader(v) === 'accountingdate');
+    const hasTpReg = vals.some(v => normHeader(v) === 'tpregnno');
+    
+    if (hasAccDate && hasTpReg) {
       headerRowIdx = rowNumber;
       vals.forEach((v, i) => {
-        const field = getTallyField(v);
+        const field = getOracleField(v);
         if (field && !(field in idxmap)) idxmap[field] = i;
       });
     }
   });
 
-  if (!headerRowIdx) throw new Error("Could not find Tally header row with 'Date' and 'Particulars'");
-  if (idxmap['gstin'] === undefined) throw new Error("Tally sheet no GSTIN column");
+  if (!headerRowIdx) throw new Error("Could not find Oracle ERP header row with 'ACCOUNTING DATE' and 'TP REGNNO'");
+  if (idxmap['gstin'] === undefined) throw new Error("Oracle sheet missing TP REGNNO column");
 
-  const dataStart = headerRowIdx + 2;
+  const dataStart = headerRowIdx + 1;
   const entries = [];
   const gstinIdx = idxmap['gstin'];
-  const particIdx = idxmap['particulars'] !== undefined ? idxmap['particulars'] : 1;
+  const partyIdx = idxmap['party'] !== undefined ? idxmap['party'] : 1;
 
   for (let r = dataStart; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
     const vals = row.values.slice(1);
     if (!vals || vals.length === 0) continue;
 
-    const p = valStr(vals[particIdx]);
-    if (p.toLowerCase() === 'total' || p.toLowerCase() === 'totals') break;
-
-    if (!p && vals[gstinIdx] == null) continue;
-    if (p && p.toLowerCase() !== 'total') {
-      if (!vals[gstinIdx] && !vals[0]) continue;
-    }
-
     const g = valStr(vals[gstinIdx]);
-    if (!g) continue;
+    const isOutward = valStr(vals[idxmap['trx_self']]).trim().toUpperCase() === 'Y';
+    
+    // We can skip empty GSTINs UNLESS it is an outward supply (TRX SELF = Y)
+    if (!isOutward && (!g || g.toLowerCase() === 'total')) continue;
 
     const dBook = parseExcelDate(vals[idxmap['date']]);
     let dDoc = parseExcelDate(vals[idxmap['doc_date']]);
     if (!dDoc) dDoc = dBook;
 
+    const cessTotal = valFloat(vals[idxmap['cess1']]) + valFloat(vals[idxmap['cess2']]);
+
     entries.push({
       date: dBook,
-      party: valStr(vals[idxmap['particulars']]),
+      party: valStr(vals[partyIdx]),
       gstin: g.toUpperCase(),
       vch_type: valStr(vals[idxmap['vch_type']]),
       vch_no: valStr(vals[idxmap['vch_no']]),
@@ -122,10 +123,14 @@ async function readTally(arrayBuffer) {
       igst: valFloat(vals[idxmap['igst']]),
       cgst: valFloat(vals[idxmap['cgst']]),
       sgst: valFloat(vals[idxmap['sgst']]),
-      cess: valFloat(vals[idxmap['cess']]),
-      tax_amount: valFloat(vals[idxmap['tax_amount']]),
+      cess: cessTotal,
+      tax_amount: valFloat(vals[idxmap['igst']]) + valFloat(vals[idxmap['cgst']]) + valFloat(vals[idxmap['sgst']]) + cessTotal,
       invoice_amount: valFloat(vals[idxmap['invoice_amount']]),
-      status: ""
+      trx_rec: valStr(vals[idxmap['trx_rec']]),
+      trx_self: valStr(vals[idxmap['trx_self']]),
+      trx_id: valStr(vals[idxmap['trx_id']]),
+      status: "",
+      raw_row: vals
     });
   }
   return entries;
@@ -145,91 +150,60 @@ const B2B_TWO_ROW = {
   filing_date: 14, itc_availability: 15
 };
 
-async function readGstB2b(arrayBuffer) {
+async function readGstB2bAndCdnr(arrayBuffer) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(arrayBuffer);
-  const ws = workbook.getWorksheet('B2B');
-  if (!ws) throw new Error("Sheet 'B2B' not found in GST file.");
+  let ws = workbook.worksheets.find(w => w.name.toUpperCase().includes('B2B'));
+  if (!ws) throw new Error("Sheet 'B2B' (or similar) not found in GST file. Note: Please ensure the file is saved as .xlsx and not .xlsb.");
 
   let hr = null;
   for (let r = 1; r <= 30; r++) {
-    const v = valStr(ws.getRow(r).getCell(1).value).toUpperCase();
-    if (v.includes("GSTIN") && v.includes("SUPPLIER")) {
+    const rowVals = ws.getRow(r).values;
+    if (!rowVals) continue;
+    const isHeader = rowVals.some(v => {
+      const s = valStr(v).toUpperCase();
+      return s.includes("GSTIN") && s.includes("SUPPLIER");
+    });
+    if (isHeader) {
       hr = r; break;
     }
   }
   if (!hr) throw new Error("Could not find B2B header row with 'GSTIN of supplier'");
 
-  const nextCell = valStr(ws.getRow(hr + 1).getCell(3).value).toLowerCase();
-  const twoRow = nextCell.includes("invoice number");
-
   let idxmap = {};
-  let dataStart;
-
-  if (twoRow) {
-    const r1 = ws.getRow(hr).values.slice(1);
-    const r2 = ws.getRow(hr + 1).values.slice(1);
-    for (let c = 0; c < Math.max(r1.length, r2.length); c++) {
-      const a = valStr(r1[c]).toLowerCase();
-      const b = valStr(r2[c]).toLowerCase();
-      const au = valStr(r1[c]).toUpperCase();
-      const bu = valStr(r2[c]).toUpperCase();
-
-      if (au.trim() === 'STATUS') { idxmap['status'] = c; continue; }
-      if (bu.trim() === 'STATUS') { idxmap['status'] = c; continue; }
-
-      if (b.includes('invoice number')) idxmap['invoice_no'] = c;
-      else if (b.includes('invoice type')) idxmap['invoice_type'] = c;
-      else if (b.includes('invoice date')) idxmap['invoice_date'] = c;
-      else if (b.includes('invoice value')) idxmap['invoice_value'] = c;
-      else if (a.startsWith('gstin')) idxmap['gstin'] = c;
-      else if (a.includes('trade') && a.includes('legal')) idxmap['name'] = c;
-      else if (a.includes('place of supply')) idxmap['place_of_supply'] = c;
-      else if (a.includes('supply attract') || a.includes('reverse charge')) idxmap['reverse_charge'] = c;
-      else if (a.includes('taxable value')) idxmap['taxable'] = c;
-      else if (b.includes('integrated tax')) idxmap['igst'] = c;
-      else if (b.includes('central tax')) idxmap['cgst'] = c;
-      else if (b.includes('state') && b.includes('tax')) idxmap['sgst'] = c;
-      else if (b.includes('cess')) idxmap['cess'] = c;
-      else if (a.includes('gstr-1') && a.includes('period')) idxmap['period'] = c;
-      else if (a.includes('filing date')) idxmap['filing_date'] = c;
-      else if (a.includes('itc availability')) idxmap['itc_availability'] = c;
-    }
-    Object.keys(B2B_TWO_ROW).forEach(k => { if (idxmap[k] === undefined) idxmap[k] = B2B_TWO_ROW[k]; });
-    dataStart = hr + 2;
-  } else {
-    const r1 = ws.getRow(hr).values.slice(1);
-    for (let c = 0; c < r1.length; c++) {
-      const v = valStr(r1[c]);
-      const n = normHeader(v);
-      const lc = v.toLowerCase();
-      if (n === 'gstinofthesupplier' || (n.startsWith('gstin') && lc.includes('supplier'))) idxmap['gstin']=c;
-      else if (lc.includes('trade') && lc.includes('legal')) idxmap['name']=c;
-      else if (lc.includes('invoice number')) idxmap['invoice_no']=c;
-      else if (lc.includes('invoice type')) idxmap['invoice_type']=c;
-      else if (lc.includes('invoice date')) idxmap['invoice_date']=c;
-      else if (lc.includes('invoice value')) idxmap['invoice_value']=c;
-      else if (lc.includes('place of supply')) idxmap['place_of_supply']=c;
-      else if (lc.includes('reverse charge') || lc.includes('supply attract')) idxmap['reverse_charge']=c;
-      else if (lc.includes('taxable')) idxmap['taxable']=c;
-      else if (v.trim().toUpperCase() === 'STATUS') idxmap['status']=c;
-      else if (lc.includes('integrated tax')) idxmap['igst']=c;
-      else if (lc.includes('central tax')) idxmap['cgst']=c;
-      else if (lc.includes('state') && lc.includes('tax')) idxmap['sgst']=c;
-      else if (lc.includes('cess')) idxmap['cess']=c;
-      else if (lc.includes('gstr-1') && lc.includes('period')) idxmap['period']=c;
-      else if (lc.includes('filing date')) idxmap['filing_date']=c;
-      else if (lc.includes('itc availability')) idxmap['itc_availability']=c;
-    }
-    Object.keys(B2B_LEGACY).forEach(k => { if (idxmap[k] === undefined) idxmap[k] = B2B_LEGACY[k]; });
-    dataStart = hr + 1;
+  const r1 = ws.getRow(hr).values.slice(1);
+  for (let c = 0; c < r1.length; c++) {
+    const v = valStr(r1[c]);
+    const lc = v.toLowerCase();
+    if (lc.includes('gstin') && lc.includes('supplier')) idxmap['gstin']=c;
+    else if (lc.includes('trade') && lc.includes('legal')) idxmap['name']=c;
+    else if (lc.includes('invoice number')) idxmap['invoice_no']=c;
+    else if (lc.includes('invoice type')) idxmap['invoice_type']=c;
+    else if (lc.includes('invoice date')) idxmap['invoice_date']=c;
+    else if (lc.includes('invoice value')) idxmap['invoice_value']=c;
+    else if (lc.includes('place of supply')) idxmap['place_of_supply']=c;
+    else if (lc.includes('reverse charge') || lc.includes('supply attract')) idxmap['reverse_charge']=c;
+    else if (lc.includes('taxable')) idxmap['taxable']=c;
+    else if (v.trim().toUpperCase() === 'STATUS') idxmap['status']=c;
+    else if (lc.includes('integrated tax')) idxmap['igst']=c;
+    else if (lc.includes('central tax')) idxmap['cgst']=c;
+    else if (lc.includes('state') && lc.includes('tax')) idxmap['sgst']=c;
+    else if (lc.includes('cess')) idxmap['cess']=c;
+    else if (lc.includes('gstr-1') && lc.includes('period')) idxmap['period']=c;
+    else if (lc.includes('filing date')) idxmap['filing_date']=c;
+    else if (lc.includes('itc availability')) idxmap['itc_availability']=c;
+    else if (v.trim().toUpperCase() === 'REASON') idxmap['reason']=c;
   }
+  Object.keys(B2B_LEGACY).forEach(k => { if (idxmap[k] === undefined) idxmap[k] = B2B_LEGACY[k]; });
 
-  const entries = [];
+  const dataStart = hr + 1;
+  const b2bEntries = [];
+  const cdnrEntries = [];
+
   for (let r = dataStart; r <= ws.rowCount; r++) {
     const vals = ws.getRow(r).values.slice(1);
-    if (!vals || vals.length === 0 || vals[0] == null) continue;
-    const gstin = valStr(vals[0]).toUpperCase();
+    if (!vals || vals.length === 0 || vals[idxmap['gstin']] == null) continue;
+    const gstin = valStr(vals[idxmap['gstin']]).toUpperCase();
     if (gstin === '' || gstin.startsWith('=')) continue;
 
     let formatDt = valStr(vals[idxmap['invoice_date']]);
@@ -243,8 +217,11 @@ async function readGstB2b(arrayBuffer) {
       const dt = vals[idxmap['filing_date']];
       filingDt = `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
     }
+    
+    const invType = valStr(vals[idxmap['invoice_type']]).toLowerCase();
+    const isCdnr = invType.includes('credit') || invType.includes('debit') || invType.includes('note') || invType.includes('cn') || invType.includes('dn');
 
-    entries.push({
+    const entry = {
       gstin,
       name: valStr(vals[idxmap['name']]),
       invoice_no: valStr(vals[idxmap['invoice_no']]),
@@ -261,56 +238,67 @@ async function readGstB2b(arrayBuffer) {
       cess: valFloat(vals[idxmap['cess']]),
       period: valStr(vals[idxmap['period']]),
       filing_date: filingDt,
-      itc_availability: valStr(vals[idxmap['itc_availability']])
-    });
+      itc_availability: valStr(vals[idxmap['itc_availability']]),
+      reason: valStr(vals[idxmap['reason']])
+    };
+
+    b2bEntries.push(entry);
   }
-  return entries;
+  return { b2b: b2bEntries, cdnr: [] };
 }
 
-async function readGstCdnr(arrayBuffer) {
+async function readGstIsd(arrayBuffer) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(arrayBuffer);
-  let ws = workbook.worksheets.find(w => {
-    const u = w.name.toUpperCase();
-    return u.includes("CDNR") && u.includes("B2B") && !u.includes("-CDNRA") && !u.includes("(REJECTED)");
-  });
-  if (!ws) ws = workbook.getWorksheet("B2B-CDNR");
+  let ws = workbook.worksheets.find(w => w.name.toUpperCase().includes('ISD'));
   if (!ws) return [];
 
-  let hr = 1;
-  for (let r = 1; r <= 20; r++) {
-    const v = valStr(ws.getRow(r).getCell(1).value).toUpperCase();
-    if (v.includes("GSTIN") && v.includes("SUPPLIER")) { hr = r; break; }
+  let hr = null;
+  for (let r = 1; r <= 30; r++) {
+    const rowVals = ws.getRow(r).values;
+    if (!rowVals) continue;
+    const isHeader = rowVals.some(v => valStr(v).toUpperCase().includes("ISD"));
+    if (isHeader) { hr = r; break; }
+  }
+  if (!hr) return [];
+
+  let idxmap = {};
+  const r1 = ws.getRow(hr).values.slice(1);
+  for (let c = 0; c < r1.length; c++) {
+    const v = valStr(r1[c]).toLowerCase();
+    if (v.includes('gstin of isd')) idxmap['gstin']=c;
+    else if (v.includes('trade') || v.includes('legal')) idxmap['name']=c;
+    else if (v.includes('document type')) idxmap['doc_type']=c;
+    else if (v.includes('document number')) idxmap['doc_no']=c;
+    else if (v.includes('document date')) idxmap['doc_date']=c;
+    else if (v.includes('integrated tax')) idxmap['igst']=c;
+    else if (v.includes('central tax')) idxmap['cgst']=c;
+    else if (v.includes('state') && v.includes('tax')) idxmap['sgst']=c;
+    else if (v.includes('cess')) idxmap['cess']=c;
   }
 
   const entries = [];
-  const start = hr + 2; 
-  for (let r = start; r <= ws.rowCount; r++) {
-    const row = ws.getRow(r);
-    const vals = row.values.slice(1);
-    if (!vals || vals.length < 13 || !vals[0]) continue;
+  const dataStart = hr + 1;
+  for (let r = dataStart; r <= ws.rowCount; r++) {
+    const vals = ws.getRow(r).values.slice(1);
+    if (!vals || vals.length === 0 || vals[idxmap['gstin']] == null) continue;
     
-    let dt = vals[5];
-    let formatDt = "";
-    if (dt instanceof Date) {
-        formatDt = `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
-    } else {
-        formatDt = valStr(dt);
+    let formatDt = valStr(vals[idxmap['doc_date']]);
+    if (vals[idxmap['doc_date']] instanceof Date) {
+      const dt = vals[idxmap['doc_date']];
+      formatDt = `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
     }
 
     entries.push({
-      gstin: valStr(vals[0]).toUpperCase(),
-      name: valStr(vals[1]),
-      note_no: valStr(vals[2]),
-      note_type: valStr(vals[3]),
-      note_supply_type: valStr(vals[4]),
-      note_date: formatDt,
-      note_value: valFloat(vals[6]),
-      taxable: valFloat(vals[9]),
-      igst: valFloat(vals[10]),
-      cgst: valFloat(vals[11]),
-      sgst: valFloat(vals[12]),
-      cess: valFloat(vals[13])
+      gstin: valStr(vals[idxmap['gstin']]).toUpperCase(),
+      name: valStr(vals[idxmap['name']]),
+      doc_no: valStr(vals[idxmap['doc_no']]),
+      doc_type: valStr(vals[idxmap['doc_type']]),
+      doc_date: formatDt,
+      igst: valFloat(vals[idxmap['igst']]),
+      cgst: valFloat(vals[idxmap['cgst']]),
+      sgst: valFloat(vals[idxmap['sgst']]),
+      cess: valFloat(vals[idxmap['cess']])
     });
   }
   return entries;

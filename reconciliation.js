@@ -57,7 +57,7 @@ function isRcm(gstEntry) {
     return s === "RCM" || (gstEntry.reverse_charge || "").trim().toUpperCase() === "YES";
 }
 
-function reconcile(tallyEntries, gstB2b, cdnrEntries, month, year) {
+function reconcile(tallyEntries, gstB2b, gstCdnr, isdEntries, month, year, resolutions = {}) {
     const currentPeriod = currentPeriodTag(month, year);
     const gstByKey = {};
     const gstByInv = {};
@@ -88,59 +88,222 @@ function reconcile(tallyEntries, gstB2b, cdnrEntries, month, year) {
         return null;
     }
 
-    const mainEntries = [];
-    const rcmTally = [];
+    const matchedTally = [];
+    const matchedEligibleTally = [];
+    const matchedRcmTally = [];
+    const outwardTally = [];
+    const notIn2bTally = [];
+    
+    // We already built gstByKey, etc.
+    const matchedGstKeys = new Set();
+    const currentYearStr = (parseInt(year, 10) >= 2026 && month !== 'January' && month !== 'February' && month !== 'March') ? 'FY ' + year + '-' + (parseInt(year,10)+1).toString().slice(2) : 'FY ' + (parseInt(year,10)-1) + '-' + year.toString().slice(2);
+    // Rough logic for 2B Year
 
+    // Pre-calculate Tally total tax per GSTIN+INV key to ensure Diff is 0 when invoice matches perfectly
+    const tallyAgg = {};
     for (const t of tallyEntries) {
+        const k = t.gstin + t.doc_no;
+        const rowTax = (t.igst || 0) + (t.cgst || 0) + (t.sgst || 0);
+        tallyAgg[k] = (tallyAgg[k] || 0) + rowTax;
+    }
+
+    const duplicates = [];
+    const overrides = [];
+    const skipIndices = new Set();
+    
+    // 1. Detect Tally Duplicates (same GSTIN, Doc No, Tax amounts, different TRX REC)
+    const tallyGroups = {};
+    for (let i = 0; i < tallyEntries.length; i++) {
+        const t = tallyEntries[i];
+        t._originalIndex = i; // Keep track for skipping
+        const k = `${t.gstin}|${t.doc_no}|${t.igst || 0}|${t.cgst || 0}|${t.sgst || 0}`;
+        if (!tallyGroups[k]) tallyGroups[k] = [];
+        tallyGroups[k].push(t);
+    }
+    
+    for (const key in tallyGroups) {
+        const group = tallyGroups[key];
+        if (group.length > 1) {
+            const hasY = group.find(g => (g.trx_rec || "").trim().toUpperCase() === "Y");
+            const hasN = group.find(g => (g.trx_rec || "").trim().toUpperCase() === "N");
+            if (hasY && hasN) {
+                // It's a duplicate pair
+                const conflictId = `dup_${hasY.gstin}_${hasY.doc_no}`;
+                duplicates.push({ id: conflictId, yRow: hasY, nRow: hasN });
+                
+                // Apply resolution if provided
+                if (resolutions[conflictId] === 'keepY') {
+                    skipIndices.add(hasN._originalIndex);
+                } else if (resolutions[conflictId] === 'keepN') {
+                    skipIndices.add(hasY._originalIndex);
+                }
+            }
+        }
+    }
+
+    for (let i = 0; i < tallyEntries.length; i++) {
+        const t = tallyEntries[i];
+        if (skipIndices.has(i)) continue; // User opted to drop this duplicate
+
         const tInv = normInv(t.doc_no);
         const tGstin = normGstin(t.gstin);
         const gstMatch = findGstMatch(tGstin, tInv);
 
-        if (gstMatch) {
-            matchedGstInvKeys.add(normInv(gstMatch.invoice_no));
-            if (isRcm(gstMatch)) {
-                t.status = gstMatch.status;
-                rcmTally.push(t);
-                continue;
+        let vLookup = null;
+        let diff = null;
+        let remark = "";
+        let itcType = "";
+        let isRecov = (t.trx_rec || "").trim().toUpperCase() === "Y";
+
+        // Col 61-71 preparation
+        const stateCode = '07';
+        const stateName = 'Delhi';
+        const keyVal = t.gstin + t.doc_no;
+        const totalTaxRow = (t.igst || 0) + (t.cgst || 0) + (t.sgst || 0);
+
+        // Inv Year based on doc_date
+        let invYear = 'FY 2026-27';
+        if (t.doc_date instanceof Date) {
+            if (t.doc_date.getFullYear() < 2026 || (t.doc_date.getFullYear() === 2026 && t.doc_date.getMonth() < 3)) {
+                invYear = 'FY 2025-26';
             }
-            t.status = gstMatch.status;
-        } else {
-            t.status = STATUS_NOT_IN_GST_2B;
         }
-        mainEntries.push(t);
+
+        if (gstMatch) {
+            matchedGstKeys.add(normInv(gstMatch.invoice_no));
+            t.status = "Matched";
+            matchedTally.push(t);
+            
+            const avail = (gstMatch.itc_availability || "").trim().toLowerCase();
+            const rcm = isRcm(gstMatch);
+            
+            // 2. Detect ITC Overrides (Tally says Y, GST says No)
+            if (isRecov && avail === "no") {
+                const conflictId = `ovr_${t.gstin}_${t.doc_no}`;
+                overrides.push({ id: conflictId, row: t });
+                
+                if (resolutions[conflictId] === 'keepRec') {
+                    // User says keep as Rec despite 2B saying No
+                    // Don't force anything
+                } else {
+                    // Default or 'forceNonRec': obey 2B
+                    isRecov = false; 
+                }
+            } else if (avail === "no") {
+                isRecov = false; // Always obey 2B if no conflict
+            }
+            
+            remark = rcm ? "RCM" : "Matched";
+            if (rcm) {
+                itcType = isRecov ? "RCM Rec" : "RCM Non Rec";
+                matchedRcmTally.push(t);
+            } else {
+                itcType = isRecov ? "Fwd Rec" : "Fwd Non Rec";
+                matchedEligibleTally.push(t);
+            }
+            
+            vLookup = (gstMatch.igst || 0) + (gstMatch.cgst || 0) + (gstMatch.sgst || 0);
+            diff = tallyAgg[keyVal] - vLookup;
+        } else {
+            // Check if it's an outward supply (TRX SELF = Y). These don't belong in 2B, but must be kept in the Inward sheet for Outward math!
+            if ((t.trx_self || "").trim().toUpperCase() === "Y") {
+                t.status = "Outward Supply";
+                remark = "Outward Supply";
+                itcType = "Outward";
+                outwardTally.push(t);
+            } else {
+                t.status = "Not in GSTR 2B";
+                remark = "Not in 2B";
+                itcType = isRecov ? "Fwd Rec" : "Fwd Non Rec";
+                notIn2bTally.push(t);
+            }
+        }
+
+        if (t.raw_row) {
+            while (t.raw_row.length < 71) t.raw_row.push(null);
+            // Ensure TRX REC matches our final resolved isRecov
+            t.raw_row[50] = isRecov ? "Y" : "N";
+            
+            t.raw_row[60] = stateCode;
+            t.raw_row[61] = stateName;
+            t.raw_row[62] = keyVal;
+            t.raw_row[63] = totalTaxRow;
+            t.raw_row[64] = vLookup;
+            t.raw_row[65] = diff;
+            t.raw_row[66] = remark;
+            t.raw_row[67] = t.trx_id;
+            t.raw_row[68] = itcType;
+            t.raw_row[69] = invYear;
+            t.raw_row[70] = 1; // Count
+        }
     }
 
-    const notIn2b = mainEntries.filter(e => isNotInGst2bStatus(e.status));
-    const holdEntries = [];
-    const portalEntries = [];
+    // Process any 'Force Includes' requested by the user
+    if (resolutions && resolutions.forceIncludes && resolutions.forceIncludes.length > 0) {
+        const forceSet = new Set(resolutions.forceIncludes.map(f => String(f.gstin).toUpperCase() + "_" + String(f.doc_no).toUpperCase()));
+        const remainingNotIn2b = [];
+        
+        for (const t of notIn2bTally) {
+            const key = String(t.gstin).toUpperCase() + "_" + String(t.doc_no).toUpperCase();
+            if (forceSet.has(key)) {
+                t.status = "Matched";
+                
+                let isRecov = ((t.trx_rec || "").trim().toUpperCase() === "Y");
+                let itcType = isRecov ? "Fwd Rec" : "Fwd Non Rec";
+                t.remark = "Matched";
+                
+                if (t.raw_row) {
+                    t.raw_row[50] = isRecov ? "Y" : "N";
+                    t.raw_row[66] = "Matched";
+                    t.raw_row[68] = itcType;
+                }
+                
+                matchedEligibleTally.push(t);
+            } else {
+                remainingNotIn2b.push(t);
+            }
+        }
+        
+        notIn2bTally.length = 0;
+        notIn2bTally.push(...remainingNotIn2b);
+    }
+
+    const eligibleItc = [];
+    const ineligibleItc = [];
+    const rcmItc = [];
+    const portalOnly = [];
 
     for (const g of gstB2b) {
-        const invKey = normCompare(g.invoice_no);
-        const alreadyMatched = matchedGstInvKeys.has(invKey);
+        const avail = (g.itc_availability || "").trim().toLowerCase();
+        const isMatched = matchedGstKeys.has(normCompare(g.invoice_no));
+        
+        if (!isMatched) {
+            portalOnly.push(g);
+        }
 
         if (isRcm(g)) {
-            if (!alreadyMatched) portalEntries.push(g);
-            continue;
-        }
-
-        if ((g.period || "").trim() !== currentPeriod && isOkStatus(g.status)) {
-            if (!alreadyMatched) holdEntries.push(g);
-            continue;
-        }
-
-        if (!alreadyMatched) {
-            portalEntries.push(g);
+            rcmItc.push(g);
+        } else if (avail === "no") {
+            ineligibleItc.push(g);
+        } else if (isMatched) {
+            // ONLY include invoices perfectly matched in Oracle ERP
+            eligibleItc.push(g);
         }
     }
 
     return {
-        main_entries: mainEntries,
-        not_in_2b: notIn2b,
-        hold_entries: holdEntries,
-        portal_entries: portalEntries,
-        rcm_tally: rcmTally,
-        cdnr_entries: cdnrEntries,
+        matched_tally: matchedTally,
+        matched_eligible_tally: matchedEligibleTally,
+        matched_rcm_tally: matchedRcmTally,
+        outward_tally: outwardTally,
+        not_in_2b: notIn2bTally,
+        portal_only: portalOnly,
+        eligible_itc: eligibleItc,
+        ineligible_itc: ineligibleItc,
+        rcm_itc: rcmItc,
+        cdnr_entries: gstCdnr,
+        isd_entries: isdEntries,
         current_period: currentPeriod,
-        portal_excluded: []
+        conflicts: { duplicates, overrides }
     };
 }
