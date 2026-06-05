@@ -40,7 +40,7 @@ function base64ToArrayBuffer(base64) {
     return bytes.buffer;
 }
 
-async function generateFinal(result, month, year, company, rcm, manualIn) {
+async function generateFinal(result, month, year, company, rcm, manualIn, outwardEntries) {
     const wb = new ExcelJS.Workbook();
     
     // Load the enterprise template from base64 string provided in template.js
@@ -65,24 +65,7 @@ async function generateFinal(result, month, year, company, rcm, manualIn) {
             });
         }
         
-        // Fill Outward Data (Overwrites formula with manual UI inputs if provided)
-        if (manualIn) {
-            for (let r = 7; r <= 14; r++) {
-                const row = ws3B.getRow(r);
-                const labelCell = row.getCell(1).value;
-                if (typeof labelCell !== 'string') continue;
-                
-                const label = labelCell.replace(/\s+/g, ' ').toLowerCase().trim();
-                
-                if (label.includes('other than zero rated, nil rated')) {
-                    if (manualIn.sales_taxable) row.getCell(2).value = manualIn.sales_taxable;
-                    if (manualIn.sales_igst) row.getCell(3).value = manualIn.sales_igst;
-                    if (manualIn.sales_cgst_sgst) row.getCell(4).value = manualIn.sales_cgst_sgst;
-                    if (manualIn.sales_cgst_sgst) row.getCell(5).value = manualIn.sales_cgst_sgst;
-                }
-            }
-        }
-        
+        // Outward Data is now handled dynamically via the Outward sheet!
         // Fix native template bug where Row 25 CGST sums SGST (AL) instead of CGST (AM)
         const row25 = ws3B.getRow(25);
         const cgstCell = row25.getCell(3);
@@ -122,6 +105,23 @@ async function generateFinal(result, month, year, company, rcm, manualIn) {
         wsUnmatched.spliceRows(3, 5000);
     }
     generateInward(wsUnmatched, result, true);
+
+    // 4. Output Outward Sales to the 'Outward' sheet if provided
+    if (outwardEntries && outwardEntries.length > 0) {
+        let wsOutward = wb.getWorksheet('Outward');
+        if (wsOutward) {
+            wsOutward.spliceRows(3, 5000); // Clear old data
+            let rIdx = 3;
+            outwardEntries.forEach(e => {
+                if (e.raw_row) {
+                    const row = wsOutward.getRow(rIdx++);
+                    e.raw_row.forEach((val, i) => {
+                        row.getCell(i + 1).value = val;
+                    });
+                }
+            });
+        }
+    }
 
     const buffer = await wb.xlsx.writeBuffer();
     return buffer;

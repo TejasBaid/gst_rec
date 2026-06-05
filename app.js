@@ -15,9 +15,8 @@ const ui = {
     rcmFreightOut: document.getElementById('rcmFreightOut'),
     rcmFreightLocal: document.getElementById('rcmFreightLocal'),
     
-    salesTaxable: document.getElementById('salesTaxable'),
-    salesCgst: document.getElementById('salesCgst'),
-    salesIgst: document.getElementById('salesIgst'),
+    outwardPath: document.getElementById('outwardPath'),
+    outwardFile: document.getElementById('outwardFile'),
     
     openIgst: document.getElementById('openIgst'),
     openCgst: document.getElementById('openCgst'),
@@ -33,9 +32,41 @@ const ui = {
     dashTotalPortal: document.getElementById('dashTotalPortal'),
     
     tbodyMatched: document.getElementById('tbodyMatched'),
+    dashTotalPortal: document.getElementById('dashTotalPortal'),
+    
+    tbodyMatched: document.getElementById('tbodyMatched'),
     tbodyMissing: document.getElementById('tbodyMissing'),
-    tbodyPortal: document.getElementById('tbodyPortal')
+    tbodyPortal: document.getElementById('tbodyPortal'),
+
+    // ISD Module Elements
+    isdInputPath: document.getElementById('isdInputPath'),
+    isdInputFile: document.getElementById('isdInputFile'),
+    turnoversPath: document.getElementById('turnoversPath'),
+    turnoversFile: document.getElementById('turnoversFile'),
+    isdStateCode: document.getElementById('isdStateCode'),
+    btnGenerateIsd: document.getElementById('btnGenerateIsd'),
+    isdLoader: document.getElementById('isdLoader'),
+    isdStatusText: document.getElementById('isdStatusText'),
+    isdResults: document.getElementById('isdResults'),
+    isdTotalPool: document.getElementById('isdTotalPool'),
+    isdTotalTurnover: document.getElementById('isdTotalTurnover'),
+    isdResultsBody: document.getElementById('isdResultsBody')
 };
+
+function switchModule(module) {
+    document.querySelectorAll('.mod-btn').forEach(btn => btn.classList.remove('active'));
+    document.getElementById('gstr3bModule').style.display = 'none';
+    document.getElementById('isdModule').style.display = 'none';
+    ui.dashboardContainer.style.display = 'none';
+
+    if (module === 'gstr3b') {
+        document.querySelector('.mod-btn:nth-child(1)').classList.add('active');
+        document.getElementById('gstr3bModule').style.display = 'block';
+    } else if (module === 'isd') {
+        document.querySelector('.mod-btn:nth-child(2)').classList.add('active');
+        document.getElementById('isdModule').style.display = 'block';
+    }
+}
 
 // Wizard Logic
 let currentStep = 1;
@@ -45,6 +76,7 @@ let cachedGstB2b = null;
 let cachedGstCdnr = null;
 let cachedGstIsd = null;
 let cachedConflicts = null;
+let cachedOutwardEntries = null;
 
 function nextStep(step) {
     if (step === 2) {
@@ -111,6 +143,15 @@ ui.tallyFile.addEventListener('change', e => {
 ui.gstFile.addEventListener('change', e => {
     if(e.target.files.length) ui.gstPath.value = e.target.files[0].name;
 });
+ui.outwardFile.addEventListener('change', e => {
+    if(e.target.files.length) ui.outwardPath.value = e.target.files[0].name;
+});
+ui.isdInputFile.addEventListener('change', e => {
+    if(e.target.files.length) ui.isdInputPath.value = e.target.files[0].name;
+});
+ui.turnoversFile.addEventListener('change', e => {
+    if(e.target.files.length) ui.turnoversPath.value = e.target.files[0].name;
+});
 
 function setStatus(msg, isError=false) {
     ui.statusText.textContent = msg;
@@ -142,6 +183,10 @@ document.getElementById('btnGoToReview').addEventListener('click', async () => {
             cachedGstB2b = gstParsed.b2b;
             cachedGstCdnr = gstParsed.cdnr;
             cachedGstIsd = await readGstIsd(gstBuffer);
+        }
+        if (ui.outwardFile.files.length > 0 && !cachedOutwardEntries) {
+            const outwardBuffer = await ui.outwardFile.files[0].arrayBuffer();
+            cachedOutwardEntries = await readOracleERP(outwardBuffer);
         }
         
         const result = reconcile(cachedTallyEntries, cachedGstB2b, cachedGstCdnr, cachedGstIsd, month, year, {});
@@ -364,15 +409,12 @@ ui.btnGenerate.addEventListener('click', async () => {
         };
 
         const manualInput = {
-            sales_taxable: parseFloat(ui.salesTaxable.value) || 0,
-            sales_cgst_sgst: parseFloat(ui.salesCgst.value) || 0,
-            sales_igst: parseFloat(ui.salesIgst.value) || 0,
             open_igst: parseFloat(ui.openIgst.value) || 0,
             open_cgst: parseFloat(ui.openCgst.value) || 0,
             open_sgst: parseFloat(ui.openSgst.value) || 0
         };
 
-        const buffer = await generateFinal(result, month, year, company, rcmInput, manualInput);
+        const buffer = await generateFinal(result, month, year, company, rcmInput, manualInput, cachedOutwardEntries);
 
         setStatus(`✅ GSTR-3B generated! Unlocking dashboard...`);
         saveFile(buffer, `Final_${month}_${year}.xlsx`);
@@ -388,5 +430,65 @@ ui.btnGenerate.addEventListener('click', async () => {
         document.getElementById('btnBackTo3').style.display = 'block';
     } finally {
         hideLoader();
+    }
+});
+
+// --- ISD Logic ---
+ui.btnGenerateIsd.addEventListener('click', async () => {
+    if (!ui.isdInputFile.files.length) return alert("Select ISD Input file");
+    if (!ui.turnoversFile.files.length) return alert("Select Turnovers file");
+    
+    ui.btnGenerateIsd.disabled = true;
+    ui.isdLoader.style.display = 'block';
+    ui.isdStatusText.textContent = 'Parsing files and calculating distribution...';
+    ui.isdStatusText.style.color = "var(--text-muted)";
+    
+    try {
+        const isdStateCode = ui.isdStateCode.value.trim() || '07';
+
+        const turnBuffer = await ui.turnoversFile.files[0].arrayBuffer();
+        const turnovers = await readTurnoversFile(turnBuffer);
+        
+        // For dashboard: read invoices to compute total pool
+        const isdBufferForRead = await ui.isdInputFile.files[0].arrayBuffer();
+        const isdInvoices = await readIsdInputFile(isdBufferForRead);
+        
+        const result = calculateIsdDistribution(isdInvoices, turnovers, isdStateCode);
+        
+        // Render Summary Dashboard
+        ui.isdTotalPool.textContent = formatCurrency(result.totalPool);
+        ui.isdTotalTurnover.textContent = formatCurrency(result.totalTurnover);
+        
+        ui.isdResultsBody.innerHTML = '';
+        result.distribution.forEach(d => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${d.gstin}</td>
+                <td>${d.stateName}</td>
+                <td>${formatCurrency(d.turnover)}</td>
+                <td style="color:var(--primary);font-weight:600">${(d.ratio * 100).toFixed(4)}%</td>
+                <td colspan="3" style="color:var(--text-muted);font-size:0.85rem;">See generated Excel for per-row breakdown</td>
+            `;
+            ui.isdResultsBody.appendChild(tr);
+        });
+        
+        ui.isdResults.style.display = 'block';
+        
+        // Generate Excel - use fresh buffer
+        ui.isdStatusText.textContent = 'Building output in isdbook format...';
+        const isdBufferFresh = await ui.isdInputFile.files[0].arrayBuffer();
+        const outBuffer = await exportIsdToExcel(isdBufferFresh, turnovers, isdStateCode);
+        saveFile(outBuffer, 'Final_ISD_Distribution.xlsx');
+        
+        ui.isdStatusText.textContent = '✅ Done! Final_ISD_Distribution.xlsx downloaded.';
+        ui.isdStatusText.style.color = "var(--primary)";
+        
+    } catch (err) {
+        console.error(err);
+        ui.isdStatusText.textContent = `❌ Error: ${err.message}`;
+        ui.isdStatusText.style.color = "var(--error)";
+    } finally {
+        ui.btnGenerateIsd.disabled = false;
+        ui.isdLoader.style.display = 'none';
     }
 });

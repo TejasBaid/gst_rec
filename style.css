@@ -327,16 +327,57 @@ button {
 }
 
 .dashboard-header {
+  margin-bottom: 2rem;
+}
+
+.header-main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 32px;
 }
 
-.dashboard-header h2 {
+header h1 {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
   font-size: 2rem;
-  color: var(--primary);
-  margin: 0;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+
+header p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.module-tabs {
+  display: flex;
+  background: var(--bg-body);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.25rem;
+}
+
+.mod-btn {
+  background: transparent;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mod-btn:hover {
+  color: var(--text);
+}
+
+.mod-btn.active {
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
 }
 
 .dashboard-cards {

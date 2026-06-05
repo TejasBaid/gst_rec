@@ -303,3 +303,78 @@ async function readGstIsd(arrayBuffer) {
   }
   return entries;
 }
+
+async function readIsdInputFile(arrayBuffer) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(arrayBuffer);
+  let ws = workbook.worksheets[0]; // Usually the first sheet
+  
+  let hr = null;
+  for (let r = 1; r <= 30; r++) {
+    const rowVals = ws.getRow(r).values;
+    if (!rowVals) continue;
+    const isHeader = rowVals.some(v => {
+      const s = valStr(v).toUpperCase();
+      return s.includes("PARTY NAME") || s.includes("GST RATE") || s.includes("IGST");
+    });
+    if (isHeader) { hr = r; break; }
+  }
+  if (!hr) throw new Error("Could not find header row in ISD Input file.");
+
+  let idxmap = {};
+  const r1 = ws.getRow(hr).values.slice(1);
+  for (let c = 0; c < r1.length; c++) {
+    const v = valStr(r1[c]).toLowerCase();
+    if (v.includes('party name')) idxmap['party_name']=c;
+    else if (v.includes('party gst no')) idxmap['gstin']=c;
+    else if (v.includes('basic amount')) idxmap['basic_amount']=c;
+    else if (v === 'igst') idxmap['igst']=c;
+    else if (v === 'cgst') idxmap['cgst']=c;
+    else if (v === 'sgst') idxmap['sgst']=c;
+    else if (v.includes('total gst')) idxmap['total_gst']=c;
+    else if (v.includes('total value')) idxmap['total_value']=c;
+  }
+
+  const entries = [];
+  const dataStart = hr + 1;
+  for (let r = dataStart; r <= ws.rowCount; r++) {
+    const vals = ws.getRow(r).values.slice(1);
+    if (!vals || vals.length === 0 || vals[idxmap['gstin']] == null) continue;
+    
+    entries.push({
+      gstin: valStr(vals[idxmap['gstin']]).toUpperCase(),
+      party_name: valStr(vals[idxmap['party_name']]),
+      igst: valFloat(vals[idxmap['igst']]),
+      cgst: valFloat(vals[idxmap['cgst']]),
+      sgst: valFloat(vals[idxmap['sgst']]),
+      total_gst: valFloat(vals[idxmap['total_gst']])
+    });
+  }
+  return entries;
+}
+
+async function readTurnoversFile(arrayBuffer) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(arrayBuffer);
+  let ws = workbook.worksheets[0];
+  
+  const entries = [];
+  // Assuming simple two columns: GSTIN and Turnover
+  // Sometimes it lacks headers or headers are on row 1
+  for (let r = 1; r <= ws.rowCount; r++) {
+    const vals = ws.getRow(r).values.slice(1);
+    if (!vals || vals.length < 2) continue;
+    
+    const col1 = valStr(vals[0]);
+    const col2 = valFloat(vals[1]);
+    
+    // Ignore header strings or empty GSTINs
+    if (col1.length > 5 && col2 > 0 && !col1.toLowerCase().includes('gstin')) {
+      entries.push({
+        gstin: col1.toUpperCase().trim(),
+        turnover: col2
+      });
+    }
+  }
+  return entries;
+}
