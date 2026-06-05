@@ -449,36 +449,33 @@ ui.btnGenerateIsd.addEventListener('click', async () => {
         const turnBuffer = await ui.turnoversFile.files[0].arrayBuffer();
         const turnovers = await readTurnoversFile(turnBuffer);
         
-        // For dashboard: read invoices to compute total pool
-        const isdBufferForRead = await ui.isdInputFile.files[0].arrayBuffer();
-        const isdInvoices = await readIsdInputFile(isdBufferForRead);
-        
-        const result = calculateIsdDistribution(isdInvoices, turnovers, isdStateCode);
+        // Generate Excel & Calculate Math
+        ui.isdStatusText.textContent = 'Building output and calculating distribution...';
+        const isdBufferFresh = await ui.isdInputFile.files[0].arrayBuffer();
+        const exportResult = await exportIsdToExcel(isdBufferFresh, turnovers, isdStateCode);
+        saveFile(exportResult.buffer, 'Final_ISD_Distribution.xlsx');
         
         // Render Summary Dashboard
-        ui.isdTotalPool.textContent = formatCurrency(result.totalPool);
-        ui.isdTotalTurnover.textContent = formatCurrency(result.totalTurnover);
+        ui.isdTotalPool.textContent = formatCurrency(exportResult.totalPool);
+        ui.isdTotalTurnover.textContent = formatCurrency(exportResult.totalTurnover);
         
         ui.isdResultsBody.innerHTML = '';
-        result.distribution.forEach(d => {
+        exportResult.summaryData.forEach(d => {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${d.gstin}</td>
                 <td>${d.stateName}</td>
                 <td>${formatCurrency(d.turnover)}</td>
                 <td style="color:var(--primary);font-weight:600">${(d.ratio * 100).toFixed(4)}%</td>
-                <td colspan="3" style="color:var(--text-muted);font-size:0.85rem;">See generated Excel for per-row breakdown</td>
+                <td style="color:var(--text-muted)">${formatCurrency(d.igst)}</td>
+                <td style="color:var(--text-muted)">${formatCurrency(d.cgst)}</td>
+                <td style="color:var(--text-muted)">${formatCurrency(d.sgst)}</td>
+                <td style="color:var(--primary);font-weight:600">${formatCurrency(d.total)}</td>
             `;
             ui.isdResultsBody.appendChild(tr);
         });
         
         ui.isdResults.style.display = 'block';
-        
-        // Generate Excel - use fresh buffer
-        ui.isdStatusText.textContent = 'Building output in isdbook format...';
-        const isdBufferFresh = await ui.isdInputFile.files[0].arrayBuffer();
-        const outBuffer = await exportIsdToExcel(isdBufferFresh, turnovers, isdStateCode);
-        saveFile(outBuffer, 'Final_ISD_Distribution.xlsx');
         
         ui.isdStatusText.textContent = '✅ Done! Final_ISD_Distribution.xlsx downloaded.';
         ui.isdStatusText.style.color = "var(--primary)";

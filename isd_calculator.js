@@ -405,23 +405,169 @@ async function exportIsdToExcel(isdBuffer, turnovers, isdStateCode) {
         ws.getCell(summaryRowNum, stateCol(i, 'total')).value = fmt(stateSummary[i].igst + stateSummary[i].cgst + stateSummary[i].sgst);
     });
 
+    // ── 8. Apply Better Formatting to Main Sheet ────────────────────
+    
+    // Format appended intermediate headers
+    const interHeaderFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } };
+    const fontWhiteBold = { bold: true, color: { argb: 'FFFFFFFF' } };
+    
+    for (let c = C_GSTIN_INV; c <= C_ITC_TYPE; c++) {
+        const cell = ws.getCell(headerRow, c);
+        cell.fill = interHeaderFill;
+        cell.font = fontWhiteBold;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+
+    // Format state headers
+    const stateHeaderFill1 = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF10B981' } }; // Green for GSTIN
+    const stateHeaderFill2 = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; // Darker green for State Name
+    const stateTaxHeaderFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6EE7B7' } }; // Light green for IGST/CGST...
+    
+    validStates.forEach((st, i) => {
+        const baseCol = stateCol(i, 'igst');
+        
+        // Format GSTIN Row
+        ws.mergeCells(5, baseCol, 5, baseCol + 3);
+        const cellGstin = ws.getCell(5, baseCol);
+        cellGstin.fill = stateHeaderFill1;
+        cellGstin.font = fontWhiteBold;
+        cellGstin.alignment = { horizontal: 'center', vertical: 'middle' };
+        
+        // Format State Name Row
+        ws.mergeCells(6, baseCol, 6, baseCol + 3);
+        const cellName = ws.getCell(6, baseCol);
+        cellName.fill = stateHeaderFill2;
+        cellName.font = fontWhiteBold;
+        cellName.alignment = { horizontal: 'center', vertical: 'middle' };
+        
+        // Format Tax Type Row (Row 8)
+        for (let j = 0; j < 4; j++) {
+            const cellTax = ws.getCell(headerRow, baseCol + j);
+            cellTax.fill = stateTaxHeaderFill;
+            cellTax.font = { bold: true, color: { argb: 'FF064E3B' } };
+            cellTax.alignment = { horizontal: 'center', vertical: 'middle' };
+        }
+    });
+
+    // Format Checking Headers
+    const chkHeaderFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF59E0B' } };
+    for (let c = C_TOTAL_DIST; c <= C_CHK_SGST; c++) {
+        const cell = ws.getCell(headerRow, c);
+        cell.fill = chkHeaderFill;
+        cell.font = { bold: true, color: { argb: 'FF78350F' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        ws.getCell(6, c).fill = chkHeaderFill;
+        ws.getCell(6, c).font = { bold: true, color: { argb: 'FF78350F' } };
+    }
+
+    // Format numbers
+    const numFormat = '#,##0.00';
+    for (let r = 7; r <= ws.rowCount; r++) {
+        for (let c = C_TOTAL_TAX; c <= C_CHK_SGST; c++) {
+            if (c === C_GSTR6A || c === C_REMARK || c === C_ITC_TYPE) continue;
+            ws.getCell(r, c).numFmt = numFormat;
+        }
+    }
+
+    // Freeze panes for easy scrolling (freeze rows only, no columns to prevent scrolling issues)
+    ws.views = [
+        { state: 'frozen', xSplit: 0, ySplit: headerRow }
+    ];
+
+    // ── 9. Create State-wise Summary Sheet ────────────────────────
+    const wsSummary = workbook.addWorksheet('State-wise Summary');
+    
+    wsSummary.columns = [
+        { header: 'State Code', key: 'code', width: 12 },
+        { header: 'State Name', key: 'name', width: 25 },
+        { header: 'GSTIN', key: 'gstin', width: 20 },
+        { header: 'Turnover', key: 'turnover', width: 20 },
+        { header: 'IGST Distributed', key: 'igst', width: 20 },
+        { header: 'CGST Distributed', key: 'cgst', width: 20 },
+        { header: 'SGST Distributed', key: 'sgst', width: 20 },
+        { header: 'Total Distributed', key: 'total', width: 20 }
+    ];
+
+    // Style summary headers
+    wsSummary.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    wsSummary.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+    wsSummary.getRow(1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    let sumTurnover = 0, sumIgst = 0, sumCgst = 0, sumSgst = 0, sumTotal = 0;
+
+    validStates.forEach((st, i) => {
+        const code = st.gstin.substring(0, 2);
+        const name = GST_STATE_MAP[code] || 'Unknown';
+        const igst = stateSummary[i].igst;
+        const cgst = stateSummary[i].cgst;
+        const sgst = stateSummary[i].sgst;
+        const total = igst + cgst + sgst;
+
+        wsSummary.addRow({
+            code: code,
+            name: name,
+            gstin: st.gstin,
+            turnover: st.turnover,
+            igst: igst,
+            cgst: cgst,
+            sgst: sgst,
+            total: total
+        });
+
+        sumTurnover += st.turnover;
+        sumIgst += igst;
+        sumCgst += cgst;
+        sumSgst += sgst;
+        sumTotal += total;
+    });
+
+    // Summary Total Row
+    const sumRow = wsSummary.addRow({
+        code: '',
+        name: 'TOTAL',
+        gstin: '',
+        turnover: sumTurnover,
+        igst: sumIgst,
+        cgst: sumCgst,
+        sgst: sumSgst,
+        total: sumTotal
+    });
+
+    sumRow.font = { bold: true, color: { argb: 'FF111827' } };
+    sumRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
+
+    // Format numbers in summary
+    wsSummary.eachRow((row, rNum) => {
+        if (rNum > 1) {
+            ['turnover', 'igst', 'cgst', 'sgst', 'total'].forEach(col => {
+                row.getCell(col).numFmt = '#,##0.00';
+            });
+        }
+    });
+
     const buffer = await workbook.xlsx.writeBuffer();
-    return buffer;
+
+    const summaryData = validStates.map((st, i) => {
+        const code = st.gstin.substring(0, 2);
+        const name = GST_STATE_MAP[code] || 'Unknown';
+        return {
+            gstin: st.gstin,
+            stateName: name,
+            turnover: st.turnover,
+            ratio: st.turnover / totalTurnover,
+            igst: stateSummary[i].igst,
+            cgst: stateSummary[i].cgst,
+            sgst: stateSummary[i].sgst,
+            total: stateSummary[i].igst + stateSummary[i].cgst + stateSummary[i].sgst
+        };
+    });
+
+    return { 
+        buffer, 
+        summaryData, 
+        totalPool: summaryTotals.totalTax, 
+        totalTurnover 
+    };
 }
 
-// Simple aggregated result for the dashboard display only
-function calculateIsdDistribution(invoices, turnovers, isdStateCode) {
-    const validStates = turnovers.filter(t => t.turnover > 0);
-    const totalTurnover = turnovers.reduce((acc, t) => acc + t.turnover, 0);
-    let totalPool = 0;
-    invoices.forEach(inv => {
-        totalPool += n(inv.igst || 0) + n(inv.cgst || 0) + n(inv.sgst || 0);
-    });
-    const distribution = validStates.map(st => {
-        const ratio = totalTurnover > 0 ? st.turnover / totalTurnover : 0;
-        const code = st.gstin.substring(0, 2);
-        const name = GST_STATE_MAP[code] || st.gstin;
-        return { gstin: st.gstin, stateName: name, turnover: st.turnover, ratio };
-    });
-    return { totalPool, totalTurnover, distribution };
-}
+// Removed calculateIsdDistribution since we now get everything from exportIsdToExcel directly
